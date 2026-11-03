@@ -2427,9 +2427,33 @@ class Step3Lidar:
         required = dict(REQUIRED_PROVIDERS)
         if needs_pdal:
             required.update(PDAL_PROVIDERS)
+            if any(registry.algorithmById(a) is None for a in PDAL_PROVIDERS):
+                # pdal_wrench is compiled into QGIS and the provider works out
+                # its own path, so there is nothing to configure. If the tools
+                # are absent, this build of QGIS was made without PDAL.
+                missing_pdal_note = (
+                    "PDAL point cloud tools. These are built into QGIS rather "
+                    "than installed separately, so there is no path to set: "
+                    "this copy of QGIS was built without PDAL support. On "
+                    "Windows, install QGIS through the OSGeo4W installer from "
+                    "qgis.org and select the qgis package (pdal_wrench lives "
+                    "in apps\\qgis). On macOS, use the official installer from "
+                    "qgis.org rather than a Homebrew or MacPorts build. Or "
+                    "supply the Ground DEM and All DEM directly and leave the "
+                    "point cloud empty.")
+            else:
+                missing_pdal_note = None
 
         missing = sorted({label for alg_id, label in required.items()
                           if registry.algorithmById(alg_id) is None})
+        if missing:
+            missing.append(
+                "SAGA NextGen is a plugin: install it from Plugins > Manage "
+                "and Install Plugins, then set its SAGA folder under Settings "
+                "> Options > Processing > Providers > SAGA NextGen.")
+
+        if needs_pdal and missing_pdal_note:
+            missing.append(missing_pdal_note)
 
         self._whitebox = next(
             ((alg_id, params) for alg_id, params in WHITEBOX_HIGH_LOW
@@ -2437,7 +2461,10 @@ class Step3Lidar:
         if self._whitebox is None:
             missing.append(
                 "Whitebox (high and low points). Install \"Whitebox Workflows "
-                "for QGIS\" on QGIS 4, or \"WhiteboxTools\" on QGIS 3.")
+                "for QGIS\" on QGIS 4, or \"WhiteboxTools\" on QGIS 3, from "
+                "Plugins > Manage and Install Plugins. Both have their own "
+                "executable path setting under Settings > Options > "
+                "Processing > Providers.")
 
         if missing:
             raise QgsProcessingException(
@@ -3119,12 +3146,8 @@ class InitialMapSetProcess(QgsProcessingAlgorithm):
         # project_acres is calculated from the property boundary in Step 1,
         # so it is not asked for here.
 
-        # --- LiDAR inputs: either the two DEMs, or a point cloud to make them
-        self.addParameter(QgsProcessingParameterRasterLayer(
-            self.P_GROUND_DEM, self.tr("Step 3: Ground DEM (leave empty if "
-                                       "supplying a point cloud)"), optional=True))
-        self.addParameter(QgsProcessingParameterRasterLayer(
-            self.P_ALL_DEM, self.tr("Step 3: All DEM"), optional=True))
+        # --- LiDAR input. The point cloud is the normal route; the two DEMs
+        # --- are the fallback and live under Advanced.
         self.addParameter(QgsProcessingParameterPointCloudLayer(
             self.P_POINT_CLOUD, self.tr("Step 3: Point cloud (builds both DEMs)"),
             optional=True))
@@ -3159,6 +3182,15 @@ class InitialMapSetProcess(QgsProcessingAlgorithm):
         self.addParameter(advanced(QgsProcessingParameterEnum(
             self.P_DISTANCE_UNIT, self.tr("Units for AOI distances"),
             options=DISTANCE_UNIT_CHOICES, defaultValue=0)))
+
+        self.addParameter(advanced(QgsProcessingParameterRasterLayer(
+            self.P_GROUND_DEM,
+            self.tr("Step 3: Ground DEM (if no point cloud available)"),
+            optional=True)))
+        self.addParameter(advanced(QgsProcessingParameterRasterLayer(
+            self.P_ALL_DEM,
+            self.tr("Step 3: All DEM (if no point cloud available)"),
+            optional=True)))
 
         self.addParameter(advanced(QgsProcessingParameterString(
             self.P_GROUND_EXPRESSION, self.tr("Point cloud: ground classification"),
@@ -3619,10 +3651,6 @@ that can be zipped and sent to a client with no broken links.</p>
 <p><b>Before running:</b> open the template and use File &gt; Save As to save it \
 into the new project folder. This script never writes to the template. Then \
 select the tax parcels that make up the site, in one or more layers.</p>
-
-<p><b>Run with Dry run ticked first.</b> It writes nothing and reports what \
-would happen, how large the output would be and roughly how long it would \
-take.</p>
 
 <h3>Step 1 &ndash; Preprocess</h3>
 <p>Sets the project CRS and the project variables. Dissolves the selected \
